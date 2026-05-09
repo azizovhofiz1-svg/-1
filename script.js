@@ -30,6 +30,126 @@ const POCKETS = [
 let balls = [];
 
 
+// --- Режим игры и ходы ---
+let gameStarted = false;
+let vsAI = false;
+let currentTurn = 1;
+const scores = { 1: 0, 2: 0 };
+let shotShooter = null;
+let pocketSnap = null;
+
+const modeSelect = document.getElementById('modeSelect');
+const player1ScoreEl = document.getElementById('player1Score');
+const player2ScoreEl = document.getElementById('player2Score');
+const turnInfoEl = document.getElementById('turnInfo');
+
+function canHumanAim() {
+    if (!gameStarted) return false;
+    const cueBall = balls[0];
+    if (!cueBall || cueBall.vx !== 0 || cueBall.vy !== 0) return false;
+    if (vsAI && currentTurn !== 1) return false;
+    return true;
+}
+
+function updateHud() {
+    if (player1ScoreEl) player1ScoreEl.textContent = `Игрок 1: ${scores[1]}`;
+    if (player2ScoreEl) {
+        player2ScoreEl.textContent = vsAI
+            ? `Компьютер: ${scores[2]}`
+            : `Игрок 2: ${scores[2]}`;
+    }
+    if (turnInfoEl) {
+        if (!gameStarted) turnInfoEl.textContent = 'Нажмите «Начать игру»';
+        else if (vsAI && currentTurn === 2) turnInfoEl.textContent = 'Ход компьютера…';
+        else if (vsAI && currentTurn === 1) turnInfoEl.textContent = 'Ваш ход';
+        else turnInfoEl.textContent = currentTurn === 1 ? 'Ход: Игрок 1' : 'Ход: Игрок 2';
+    }
+}
+
+function anyBallMoving() {
+    const eps = 0.001;
+    return balls.some(
+        (b) => !b.pocketed && (Math.abs(b.vx) > eps || Math.abs(b.vy) > eps),
+    );
+}
+
+function finalizeShotAfterStop() {
+    if (shotShooter === null || pocketSnap === null) return;
+
+    for (let i = 1; i < balls.length; i++) {
+        if (balls[i].pocketed && !pocketSnap[i]) scores[shotShooter]++;
+    }
+
+    shotShooter = null;
+    pocketSnap = null;
+
+    currentTurn = currentTurn === 1 ? 2 : 1;
+    updateHud();
+
+    if (gameStarted && vsAI && currentTurn === 2 && !anyBallMoving()) queueComputerShot();
+}
+
+function strikeCue(angle, power, shooter) {
+    const cueBall = balls[0];
+    if (!cueBall || cueBall.vx !== 0 || cueBall.vy !== 0) return;
+    shotShooter = shooter;
+    pocketSnap = balls.map((b) => b.pocketed);
+
+    cueBall.vx = Math.cos(angle) * power;
+    cueBall.vy = Math.sin(angle) * power;
+}
+
+let aiShotTimer = null;
+function queueComputerShot() {
+    if (aiShotTimer) clearTimeout(aiShotTimer);
+    aiShotTimer = setTimeout(() => {
+        aiShotTimer = null;
+        takeComputerShot();
+    }, 500);
+}
+
+function takeComputerShot() {
+    if (!gameStarted || !vsAI || currentTurn !== 2 || anyBallMoving()) return;
+
+    const cue = balls[0];
+    const targets = balls.filter((_, i) => i > 0 && !balls[i].pocketed);
+    if (!targets.length || !cue) return;
+
+    let bestGx = targets[0].x;
+    let bestGy = targets[0].y;
+    let bestDist = Infinity;
+
+    for (const t of targets) {
+        for (const p of POCKETS) {
+            const ux = p.x - t.x;
+            const uy = p.y - t.y;
+            const len = Math.hypot(ux, uy);
+            if (len < 1) continue;
+            const nx = ux / len;
+            const ny = uy / len;
+            const gx = t.x - nx * (BALL_RADIUS * 2 + 1);
+            const gy = t.y - ny * (BALL_RADIUS * 2 + 1);
+            const dx = gx - cue.x;
+            const dy = gy - cue.y;
+            const d = dx * dx + dy * dy;
+            if (d < bestDist) {
+                bestDist = d;
+                bestGx = gx;
+                bestGy = gy;
+            }
+        }
+    }
+
+    let angle = Math.atan2(bestGy - cue.y, bestGx - cue.x);
+    angle += (Math.random() - 0.5) * 0.12;
+    const power = Math.min(
+        24,
+        11 + Math.random() * 9,
+    );
+
+    strikeCue(angle, power, 2);
+}
+
 // Управление мышью: прицеливание и удар
 let isAiming = false;
 let aimStart = null;
@@ -37,9 +157,9 @@ let aimEnd = null;
 
 
 canvas.addEventListener('mousedown', (e) => {
+    if (!canHumanAim()) return;
     // Проверяем, что биток остановился
     const cueBall = balls[0];
-    if (cueBall.vx !== 0 || cueBall.vy !== 0) return;
     isAiming = true;
     const rect = canvas.getBoundingClientRect();
     aimStart = {
@@ -53,7 +173,7 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 canvas.addEventListener('mousemove', (e) => {
-    if (!isAiming) return;
+    if (!isAiming || !canHumanAim()) return;
     const rect = canvas.getBoundingClientRect();
     aimEnd = {
         x: e.clientX - rect.left,
@@ -66,18 +186,19 @@ canvas.addEventListener('mouseup', (e) => {
     if (!isAiming) return;
     isAiming = false;
     const cueBall = balls[0];
-    // Проверяем, что биток остановился
+    // Проверяем, что биток остановился и ход наш
     if (!cueBall || cueBall.vx !== 0 || cueBall.vy !== 0) return;
+    if (!canHumanAim()) return;
     // Сила удара — длина линии (ограничим максимум)
     const dx = aimEnd.x - aimStart.x;
     const dy = aimEnd.y - aimStart.y;
     let power = Math.sqrt(dx*dx + dy*dy) / 6;
     power = power * 4; // Увеличиваем силу удара в 4 раза относительно исходной формулы
     power = Math.min(power, 28); // Поднимаем максимум, чтобы удары были реально сильными
+    if (power < 0.15) return;
     // Направление
     const angle = Math.atan2(dy, dx);
-    cueBall.vx = Math.cos(angle) * power;
-    cueBall.vy = Math.sin(angle) * power;
+    strikeCue(angle, power, currentTurn);
 });
 
 function drawAimLine() {
@@ -95,8 +216,8 @@ function drawAimLine() {
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.restore();
-    } else if (cueBall && cueBall.vx === 0 && cueBall.vy === 0) {
-        // Если биток остановлен — показываем кий вправо
+    } else if (cueBall && cueBall.vx === 0 && cueBall.vy === 0 && canHumanAim()) {
+        // Если биток остановлен — показываем кий вправо (только когда человек может бить)
         const defaultAim = {x: cueBall.x + 80, y: cueBall.y};
         drawCueStick({x: cueBall.x, y: cueBall.y}, defaultAim);
     }
@@ -371,7 +492,7 @@ function updateBalls() {
         }
     }
 
-    // ...existing code...
+    if (gameStarted && shotShooter !== null && !anyBallMoving()) finalizeShotAfterStop();
 }
 
 function gameLoop() {
@@ -386,6 +507,7 @@ function gameLoop() {
 // Инициализация
 window.onload = function() {
     initBalls();
+    updateHud();
     gameLoop();
 };
 
@@ -420,7 +542,27 @@ function showTurnAdvice(player) {
 const startBtn = document.getElementById('startBtn');
 if (startBtn) {
     startBtn.addEventListener('click', () => {
-        assistantSay('Игра началась! Попробуй забить шар — тяни линию от битка и отпусти мышь.');
+        scores[1] = 0;
+        scores[2] = 0;
+        vsAI = modeSelect && modeSelect.value === 'ai';
+        gameStarted = true;
+        currentTurn = 1;
+        shotShooter = null;
+        pocketSnap = null;
+        if (aiShotTimer) clearTimeout(aiShotTimer);
+        aiShotTimer = null;
+        isAiming = false;
+
+        initBalls();
+        updateHud();
+
+        assistantSay(
+            vsAI
+                ? 'Режим против компьютера. Вы бьёте первыми; после остановки шаров ход переходит ИИ.'
+                : 'Два игрока по очереди: тяните от бита и отпускайте мышь.'
+        );
+
         showTurnAdvice(1);
+        if (!anyBallMoving() && vsAI && currentTurn === 2) queueComputerShot();
     });
 }
