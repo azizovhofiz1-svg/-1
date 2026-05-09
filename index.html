@@ -1,0 +1,35 @@
+Ш<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Бильярд 2D</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="ui">
+        <h1>Бильярд 2D</h1>
+        <div class="controls">
+            <button id="startBtn">Начать игру</button>
+            <select id="modeSelect">
+                <option value="pvp">2 игрока</option>
+                <option value="ai">Против компьютера</option>
+            </select>
+        </div>
+        <div class="scoreboard">
+            <span id="player1Score">Игрок 1: 0</span>
+            <span id="player2Score">Игрок 2: 0</span>
+            <span id="turnInfo">Ход: Игрок 1</span>
+        </div>
+            <div class="assistant" style="margin-top:16px;">
+                <h2 style="font-size:18px;margin:0 0 6px 0;">ИИ-ассистент</h2>
+                <div id="assistantMessages" style="height:100px;overflow-y:auto;background:#222;color:#fff;padding:8px;border-radius:6px;font-size:15px;margin-bottom:8px;">
+                    Привет! Я помогу тебе играть в бильярд. Жми "Начать игру" и следуй подсказкам!
+                </div>
+                <button id="helpBtn">Как играть?</button>
+            </div>
+    </div>
+    <canvas id="gameCanvas" width="900" height="500"></canvas>
+    <script src="script.js"></script>
+</body>
+</html>
